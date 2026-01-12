@@ -4,4 +4,4 @@ add_executable(DeviceAccessModule
     WebServer.cpp
 )
 
-target_link_libraries(DeviceAccessModule PRIVATE ${OSIP2_LIBRARIES} pthread)
+target_link_libraries(DeviceAccessModule PRIVATE ${OSIP2_LIBRARIES} ${LIBXML2_LIBRARIES} pthread)

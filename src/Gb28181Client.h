@@ -5,7 +5,12 @@
 #include <thread>
 #include <iostream>
 #include <chrono>
+#include <vector>
 #include <eXosip2/eXosip2.h>
+
+// Forward declaration for osip_message_t
+struct osip_message;
+typedef struct osip_message osip_message_t;
 
 class Gb28181Client {
 public:
@@ -17,6 +22,8 @@ public:
 
 private:
     void eventLoop();
+    void handleMessage(eXosip_event_t* ev);
+    std::string buildCatalogResponse(const std::string& sn);
 
     std::string serverIp_;
     int serverPort_;
