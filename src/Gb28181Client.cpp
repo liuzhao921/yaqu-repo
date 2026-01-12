@@ -4,6 +4,7 @@
 #include <libxml/tree.h>
 #include <osip2/osip_sdp.h>
 #include <random>
+#include <cstdio> // For std::system
 
 // For generating a unique SN (sequence number)
 std::atomic<int> sn_counter(0);
@@ -240,20 +241,198 @@ void Gb28181Client::handleMessageAnswer(eXosip_event_t* ev) {
     }
 }
 
-void Gb28181Client::handleInvite(eXosip_event_t* ev) { /* ... existing code ... */ }
+void Gb28181Client::handleInvite(eXosip_event_t* ev) {
+    if (!ev || !ev->request) {
+        return;
+    }
 
-void Gb28181Client::handleAck(eXosip_event_t* ev) { /* ... existing code ... */ }
+    osip_message_t *request = ev->request;
+    osip_body_t *body = nullptr;
+    osip_message_get_body(request, 0, &body);
 
-void Gb28181Client::handleBye(eXosip_event_t* ev) { /* ... existing code ... */ }
+    std::string remoteIp;
+    int remotePort = 0;
+    int localRtpPort = 0;
 
-std::string Gb28181Client::buildCatalogResponse(const std::string& sn) { /* ... existing code ... */ }
+    if (body && body->body) {
+        std::cout << "Received SDP: " << body->body << std::endl;
+        parseSdp(request, remoteIp, remotePort);
+    }
 
-std::string Gb28181Client::buildKeepAliveMessage() { /* ... existing code ... */ }
+    if (remotePort == 0) {
+        std::cerr << "Failed to parse remote SDP for RealPlay." << std::endl;
+        // Send error response
+        osip_message_t *answer = nullptr;
+        eXosip_message_build_answer(context_, request, 400, &answer); // Bad Request
+        eXosip_message_send_answer(context_, ev->tid, answer);
+        return;
+    }
 
-void Gb28181Client::parseSdp(osip_message_t* sdpMessage, std::string& remoteIp, int& remotePort) { /* ... existing code ... */ }
+    localRtpPort = getAvailableRtpPort();
+    if (localRtpPort == 0) {
+        std::cerr << "Failed to get an available RTP port." << std::endl;
+        osip_message_t *answer = nullptr;
+        eXosip_message_build_answer(context_, request, 503, &answer); // Service Unavailable
+        eXosip_message_send_answer(context_, ev->tid, answer);
+        return;
+    }
 
-std::string Gb28181Client::buildSdpAnswer(const std::string& remoteIp, int remotePort, int localRtpPort) { /* ... existing code ... */ }
+    // Build 200 OK with local SDP
+    osip_message_t *answer = nullptr;
+    eXosip_message_build_answer(context_, request, 200, &answer);
+    osip_message_set_content_type(answer, "Application/sdp");
 
-void Gb28181Client::startRtpStream(int callId, const std::string& remoteIp, int remotePort, int localRtpPort, std::atomic<bool>& runningFlag) { /* ... existing code ... */ }
+    std::string localSdp = buildSdpAnswer(remoteIp, remotePort, localRtpPort); 
+    osip_message_set_body(answer, localSdp.c_str(), localSdp.length());
+    eXosip_message_send_answer(context_, ev->tid, answer);
+    std::cout << "Sent 200 OK for RealPlay INVITE. Local RTP Port: " << localRtpPort << std::endl;
 
-int Gb28181Client::getAvailableRtpPort() { /* ... existing code ... */ }
+    // Create and store RtpSession
+    std::lock_guard<std::mutex> lock(rtpSessionsMutex_);
+    rtpSessions_.emplace(ev->cid, RtpSession(remoteIp, remotePort, localRtpPort, ev->cid));
+    RtpSession& currentSession = rtpSessions_.at(ev->cid);
+    currentSession.rtpThread = std::thread(&Gb28181Client::startRtpStream, this, ev->cid, remoteIp, remotePort, localRtpPort, std::ref(currentSession.running));
+}
+
+void Gb28181Client::handleAck(eXosip_event_t* ev) {
+    std::cout << "ACK received for call ID: " << ev->cid << ". RTP stream should be active." << std::endl;
+}
+
+void Gb28181Client::handleBye(eXosip_event_t* ev) {
+    std::lock_guard<std::mutex> lock(rtpSessionsMutex_);
+    auto it = rtpSessions_.find(ev->cid);
+    if (it != rtpSessions_.end()) {
+        it->second.stop(); // Stop the RTP thread and join it
+        rtpSessions_.erase(it);
+        std::cout << "RTP session for call ID " << ev->cid << " terminated." << std::endl;
+    } else {
+        std::cerr << "Error: BYE received for unknown call ID: " << ev->cid << std::endl;
+    }
+}
+
+std::string Gb28181Client::buildCatalogResponse(const std::string& sn) {
+    std::string response = "<?xml version=\"1.0\" encoding=\"GB2312\"?>\n";
+    response += "<Response>\n";
+    response += "  <CmdType>Catalog</CmdType>\n";
+    response += "  <SN>" + sn + "</SN>\n";
+    response += "  <DeviceID>" + deviceId_ + "</DeviceID>\n";
+    response += "  <SumNum>1</SumNum>\n";
+    response += "  <DeviceList Num=\'1\'>\n";
+    response += "    <Item>\n";
+    response += "      <DeviceID>" + deviceId_ + "01</DeviceID>\n"; // Example channel ID
+    response += "      <Name>Camera 01</Name>\n";
+    response += "      <Manufacturer>Manus</Manufacturer>\n";
+    response += "      <Model>Model A</Model>\n";
+    response += "      <Owner>Owner A</Owner>\n";
+    response += "      <CivilCode>440300</CivilCode>\n";
+    response += "      <Block>Block A</Block>\n";
+    response += "      <Address>Address A</Address>\n";
+    response += "      <Parental>1</Parental>\n";
+    response += "      <ParentID>" + deviceId_ + "</ParentID>\n";
+    response += "      <RegisterWay>1</RegisterWay>\n";
+    response += "      <Secrecy>0</Secrecy>\n";
+    response += "      <Status>ON</Status>\n";
+    response += "      <Longitude>113.94</Longitude>\n";
+    response += "      <Latitude>22.55</Latitude>\n";
+    response += "      <StreamStatus>ON</StreamStatus>\n";
+    response += "    </Item>\n";
+    response += "  </DeviceList>\n";
+    response += "</Response>";
+    return response;
+}
+
+std::string Gb28181Client::buildKeepAliveMessage() {
+    int current_sn = ++sn_counter;
+    std::string xml = "<?xml version=\"1.0\"?>\n";
+    xml += "<Notify>\n";
+    xml += "  <CmdType>Keepalive</CmdType>\n";
+    xml += "  <SN>" + std::to_string(current_sn) + "</SN>\n";
+    xml += "  <DeviceID>" + deviceId_ + "</DeviceID>\n";
+    xml += "  <Status>OK</Status>\n";
+    xml += "</Notify>";
+    return xml;
+}
+
+void Gb28181Client::parseSdp(osip_message_t* sdpMessage, std::string& remoteIp, int& remotePort) {
+    osip_sdp_message_t *sdp = nullptr;
+    osip_message_get_sdp(sdpMessage, &sdp);
+
+    if (sdp) {
+        if (sdp->c_list.nb_elt > 0) {
+            osip_sdp_connection_t *c = (osip_sdp_connection_t*)osip_list_get_get(sdp->c_list, 0);
+            if (c && c->connection_address) {
+                remoteIp = c->connection_address;
+            }
+        }
+
+        if (sdp->m_list.nb_elt > 0) {
+            osip_sdp_media_t *m = (osip_sdp_media_t*)osip_list_get_get(sdp->m_list, 0);
+            if (m && m->port) {
+                remotePort = std::stoi(m->port);
+            }
+        }
+        osip_sdp_message_free(sdp);
+    }
+    std::cout << "Parsed SDP: Remote IP = " << remoteIp << ", Remote Port = " << remotePort << std::endl;
+}
+
+std::string Gb28181Client::buildSdpAnswer(const std::string& remoteIp, int remotePort, int localRtpPort) {
+    std::string sdp = "v=0\r\n";
+    sdp += "o-" + deviceId_ + " 0 0 IN IP4 " + remoteIp + "\r\n"; 
+    sdp += "s=Play\r\n";
+    sdp += "c=IN IP4 " + remoteIp + "\r\n"; 
+    sdp += "t=0 0\r\n";
+    sdp += "m=video " + std::to_string(localRtpPort) + " RTP/AVP 96\r\n"; // Use dynamic localRtpPort
+    sdp += "a=recvonly\r\n";
+    sdp += "a=rtpmap:96 PS/90000\r\n"; 
+    return sdp;
+}
+
+void Gb28181Client::startRtpStream(int callId, const std::string& remoteIp, int remotePort, int localRtpPort, std::atomic<bool>& runningFlag) {
+    std::cout << "RTP Stream (Call ID: " << callId << ") starting to " << remoteIp << ":" << remotePort 
+              << " from local port " << localRtpPort << std::endl;
+    
+    // This is a placeholder for actual RTP streaming logic.
+    // In a real implementation, you would open a UDP socket on localRtpPort,
+    // read video data, encapsulate it into RTP/PS packets, and send to remoteIp:remotePort.
+    // For demonstration, we simulate pushing a dummy stream using FFmpeg to ZLMediaKit.
+    
+    // Construct FFmpeg command to push a test stream to ZLMediaKit
+    // Note: ZLMediaKit should be running and configured to accept RTMP streams.
+    // The stream_id should be unique for each concurrent stream.
+    std::string streamId = deviceId_ + "_channel" + std::to_string(callId);
+    std::string rtmpUrl = zlMediaKitPushUrl_ + streamId;
+
+    // Example FFmpeg command: generate a test source and push as RTMP
+    // This command will run in a separate process and push a dummy video stream.
+    std::string ffmpegCmd = "ffmpeg -re -f lavfi -i testsrc=size=640x480:rate=30 -f lavfi -i sine=frequency=1000 -c:v libx264 -preset veryfast -tune zerolatency -c:a aac -ar 44100 -f flv " + rtmpUrl + " > /dev/null 2>&1";
+    
+    std::cout << "Executing FFmpeg command: " << ffmpegCmd << std::endl;
+
+    // Use a pipe to manage the FFmpeg process
+    FILE* pipe = popen(ffmpegCmd.c_str(), "w");
+    if (!pipe) {
+        std::cerr << "Failed to open pipe for FFmpeg command." << std::endl;
+        return;
+    }
+
+    while (runningFlag) {
+        // Keep the thread alive while FFmpeg is pushing. 
+        // In a real scenario, this loop would manage reading from camera and sending RTP.
+        std::this_thread::sleep_for(std::chrono::seconds(1)); 
+    }
+
+    // When streaming stops, close the FFmpeg process
+    pclose(pipe);
+    std::cout << "RTP Stream (Call ID: " << callId << ") stopped. FFmpeg process terminated." << std::endl;
+}
+
+int Gb28181Client::getAvailableRtpPort() {
+    int port = nextRtpPort_.fetch_add(2); 
+    if (port > RTP_PORT_END) {
+        nextRtpPort_ = RTP_PORT_START; 
+        port = nextRtpPort_.fetch_add(2);
+        if (port > RTP_PORT_END) return 0; 
+    }
+    return port;
+}

@@ -60,7 +60,7 @@ private:
     void startRtpStream(int callId, const std::string& remoteIp, int remotePort, int localRtpPort, std::atomic<bool>& runningFlag);
     int getAvailableRtpPort();
 
-    // New: PTZ control functions
+    // PTZ control functions
     void handleDeviceControl(eXosip_event_t* ev, const std::string& cmdType, const std::string& sn, const std::string& deviceId, const std::string& ptzCmd);
     void decodeAndExecutePtzCmd(const std::string& ptzCmd);
 
@@ -79,6 +79,9 @@ private:
     std::map<int, RtpSession> rtpSessions_; // Map callId to RtpSession
     std::mutex rtpSessionsMutex_; // Mutex for protecting rtpSessions_
     std::atomic<int> nextRtpPort_; // For dynamic RTP port allocation
+
+    // Placeholder for ZLMediaKit push URL
+    std::string zlMediaKitPushUrl_ = "rtmp://127.0.0.1/live/stream_id"; // Example URL
 };
 
 #endif // GB28181_CLIENT_H
