@@ -22,10 +22,14 @@ public:
 
 private:
     void eventLoop();
+    void keepAliveLoop(); // New: for sending periodic keep-alive messages
     void handleMessage(eXosip_event_t* ev);
     void handleInvite(eXosip_event_t* ev);
+    void handleMessageAnswer(eXosip_event_t* ev); // New: to handle responses to MESSAGE requests
+
     std::string buildCatalogResponse(const std::string& sn);
     std::string buildSdpAnswer(const std::string& remoteIp, int remotePort);
+    std::string buildKeepAliveMessage(); // New: to construct keep-alive XML
     void parseSdp(osip_message_t* sdpMessage, std::string& remoteIp, int& remotePort);
     void startRtpStream(const std::string& remoteIp, int remotePort);
 
@@ -39,6 +43,7 @@ private:
     eXosip_t* context_;
     int registerId_;
     std::thread eventThread_;
+    std::thread keepAliveThread_; // New: thread for keep-alive
 };
 
 #endif // GB28181_CLIENT_H
