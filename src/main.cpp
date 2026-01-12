@@ -6,7 +6,7 @@ int main() {
     std::cout << "Device Access Module Starting..." << std::endl;
 
     // Initialize GB28181 Client
-    Gb28181Client gbClient("192.168.1.100", 5060, "34020000001320000001", "3402000000");
+    Gb28181Client gbClient("192.168.1.100", 5060, "34020000001320000001", "3402000000", "admin123");
     gbClient.start();
 
     // Initialize Web Server for video streaming
