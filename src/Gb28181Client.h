@@ -23,7 +23,11 @@ public:
 private:
     void eventLoop();
     void handleMessage(eXosip_event_t* ev);
+    void handleInvite(eXosip_event_t* ev);
     std::string buildCatalogResponse(const std::string& sn);
+    std::string buildSdpAnswer(const std::string& remoteIp, int remotePort);
+    void parseSdp(osip_message_t* sdpMessage, std::string& remoteIp, int& remotePort);
+    void startRtpStream(const std::string& remoteIp, int remotePort);
 
     std::string serverIp_;
     int serverPort_;
