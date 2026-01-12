@@ -49,8 +49,8 @@ private:
     void keepAliveLoop();
     void handleMessage(eXosip_event_t* ev);
     void handleInvite(eXosip_event_t* ev);
-    void handleAck(eXosip_event_t* ev); // New: to handle ACK for INVITE
-    void handleBye(eXosip_event_t* ev); // New: to handle BYE for session termination
+    void handleAck(eXosip_event_t* ev);
+    void handleBye(eXosip_event_t* ev);
     void handleMessageAnswer(eXosip_event_t* ev);
 
     std::string buildCatalogResponse(const std::string& sn);
@@ -58,7 +58,11 @@ private:
     std::string buildKeepAliveMessage();
     void parseSdp(osip_message_t* sdpMessage, std::string& remoteIp, int& remotePort);
     void startRtpStream(int callId, const std::string& remoteIp, int remotePort, int localRtpPort, std::atomic<bool>& runningFlag);
-    int getAvailableRtpPort(); // New: for dynamic port allocation
+    int getAvailableRtpPort();
+
+    // New: PTZ control functions
+    void handleDeviceControl(eXosip_event_t* ev, const std::string& cmdType, const std::string& sn, const std::string& deviceId, const std::string& ptzCmd);
+    void decodeAndExecutePtzCmd(const std::string& ptzCmd);
 
     std::string serverIp_;
     int serverPort_;
